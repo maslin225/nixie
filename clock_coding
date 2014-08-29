@@ -1,0 +1,147 @@
+#include <Wire.h>  
+#include "RTClib.h"
+
+
+#define SET 0
+#define RUN 1
+#define COUNT 2
+
+// **** set mode here ****
+#define MODE COUNT 
+// ***********************
+
+#define LATPIN 5
+#define CLKPIN 6
+#define DATPIN 7
+#define SHIFTDELAY 10
+
+#define HIGH_NIBBLE(x) (x >> 4)
+#define LOW_NIBBLE(x)  (x & 0x0f)
+
+RTC_DS1307 rtc;
+
+void setup() {
+  byte out[6];
+
+  pinMode(LATPIN, OUTPUT);
+  pinMode(CLKPIN, OUTPUT);
+  pinMode(DATPIN, OUTPUT);
+
+  digitalWrite(CLKPIN, 0);
+  digitalWrite(DATPIN, 0);
+  digitalWrite(LATPIN, 0);
+
+  // initialize serial
+  Serial.begin(9600);
+
+  // initialize RTC
+  if (MODE==SET) {
+    Wire.begin();
+    // set the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(__DATE__, __TIME__));
+    rtc.begin();
+  } else if (MODE==RUN) {
+    Wire.begin();
+    rtc.begin();
+  }
+}
+
+
+void loop () {
+  byte out[6];
+  static byte count = 0;
+
+  if (MODE==SET || MODE==RUN) {
+    delay(100);
+    
+    DateTime now = rtc.now();
+   
+    int h = now.hour();
+    if (h > 12) h -= 12;
+  
+    out[5] = LOW_NIBBLE(dec2bcd(now.second()));
+    out[4] =  HIGH_NIBBLE(dec2bcd(now.second()));
+    out[3] = LOW_NIBBLE(dec2bcd(now.minute()));
+    out[2] =  HIGH_NIBBLE(dec2bcd(now.minute()));
+    out[1] = LOW_NIBBLE(dec2bcd(h));
+    out[0] =  HIGH_NIBBLE(dec2bcd(h));
+  } else if (MODE==COUNT) {
+    delay(1000);
+    out[5] = dec2bcd(count);
+    out[4] = dec2bcd(count);
+    out[3] = dec2bcd(count);
+    out[2] = dec2bcd(count);
+    out[1] = dec2bcd(count);
+    out[0] = dec2bcd(count);
+    if (++count >= 10) count = 0;
+  }
+  
+  Serial.print("CLOCK : ");
+  Serial.print(out[0],HEX);
+  Serial.print(out[1],HEX);
+  Serial.print(":");
+  Serial.print(out[2],HEX); 
+  Serial.print(out[3],HEX);
+  Serial.print(":");
+  Serial.print(out[4],HEX);
+  Serial.print(out[5],HEX);
+  Serial.print("\n");
+
+  encodeArray(&out[0],6);
+  shiftArray(&out[0],6);   
+}
+
+
+byte dec2bcd(byte val) {
+  return ( (val/10*16) + (val%10) );
+}
+
+
+void encodeArray(byte * data, int length) {
+  byte seg[10] = { 
+    B00111111, \
+  B00000110, \
+  B01011011, \
+  B01001111, \
+  B01100110, \
+  B01101101, \
+  B01111101, \
+  B00000111, \
+  B01111111, \
+  B01100111                }; 
+
+  for (int i=0; i<length; i++) {
+    if ((data[i]>=0) && (data[i]<=9)) {
+      if ((i==0) && (data[i]==0))
+        data[i] = 0;
+      else
+        data[i] = seg[ data[i] ];
+    }
+    else {
+      Serial.println("out of range");
+    } 
+  }
+}
+
+
+void shiftArray(byte * data, int length) {
+  for (int i=0; i<length; i++) {
+    for (int j=7; j>=0; j--)  {
+      digitalWrite(CLKPIN, 0);
+      digitalWrite(DATPIN, data[i] & (1<<j) );
+      delayMicroseconds(SHIFTDELAY);
+      digitalWrite(CLKPIN, 1);
+      delayMicroseconds(SHIFTDELAY);
+    }
+  }
+  digitalWrite(CLKPIN, 0);
+  digitalWrite(DATPIN, 0);
+
+  // pulse LAT
+  digitalWrite(LATPIN, 1);
+  delayMicroseconds(SHIFTDELAY);
+  digitalWrite(LATPIN, 0);
+}
+
+
+
